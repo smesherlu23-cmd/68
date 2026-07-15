@@ -56,8 +56,6 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
-# Столбцы, добавленные в новой (мультиаккаунтной) схеме, — для миграции
-# баз, созданных прошлыми версиями приложения.
 _MIGRATIONS = {
     "posts": {
         "platform": "TEXT NOT NULL DEFAULT ''",
@@ -102,8 +100,6 @@ class Database:
                 if name not in existing:
                     self._conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
-
-    # ---------- посты ----------
 
     def save_post(self, post: Post) -> Post:
         with self._lock, self._conn:
@@ -152,8 +148,6 @@ class Database:
             scheduled_at=_dt(row["scheduled_at"]),
         )
 
-    # ---------- аккаунты ----------
-
     def save_account(self, account: Account) -> Account:
         with self._lock, self._conn:
             if account.created_at is None:
@@ -194,8 +188,6 @@ class Database:
             id=row["id"], platform=row["platform"], name=row["name"],
             created_at=_dt(row["created_at"]),
         )
-
-    # ---------- публикации ----------
 
     def add_publication(self, post_id: int, platform: str, account_id: str = "",
                         account_name: str = "",
@@ -245,15 +237,11 @@ class Database:
             external_url=row["external_url"], attempts=row["attempts"],
         )
 
-    # ---------- логи ----------
-
     def add_log(self, level: str, source: str, message: str) -> None:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO logs (ts, level, source, message) VALUES (?,?,?,?)",
                 (_ts(datetime.now()), level, source, message))
-
-    # ---------- настройки ----------
 
     def get_setting(self, key: str, default: str = "") -> str:
         with self._lock:

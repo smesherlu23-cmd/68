@@ -12,7 +12,7 @@ class PostStatus:
     DRAFT = "draft"
     SCHEDULED = "scheduled"
     PUBLISHED = "published"
-    PARTIAL = "partial"       # опубликован не во всех аккаунтах
+    PARTIAL = "partial"
     ERROR = "error"
     CANCELLED = "cancelled"
 
@@ -32,9 +32,9 @@ class Account:
     блога и т.п.) — в защищённом хранилище с ключом по id аккаунта.
     """
 
-    id: str = ""               # уникальный идентификатор (uuid4 hex)
-    platform: str = ""         # "pinterest" | "boosty"
-    name: str = ""             # отображаемое имя, напр. «Основной бренд»
+    id: str = ""
+    platform: str = ""
+    name: str = ""
     created_at: Optional[datetime] = None
 
 
@@ -46,11 +46,11 @@ class Post:
     id: Optional[int] = None
     title: str = ""
     text: str = ""
-    link: str = ""             # целевой URL пина (Pinterest)
-    board: str = ""            # доска Pinterest
-    media: list[str] = field(default_factory=list)  # пути к файлам медиа
-    platform: str = ""         # выбранная площадка публикации
-    accounts: list[str] = field(default_factory=list)  # id выбранных аккаунтов
+    link: str = ""
+    board: str = ""
+    media: list[str] = field(default_factory=list)
+    platform: str = ""
+    accounts: list[str] = field(default_factory=list)
     status: str = PostStatus.DRAFT
     created_at: Optional[datetime] = None
     scheduled_at: Optional[datetime] = None

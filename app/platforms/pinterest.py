@@ -26,7 +26,6 @@ class PinterestAdapter(PlatformAdapter):
     name = "Pinterest"
     letter = "P"
 
-    # лимиты Pinterest API v5 (используются в UI для счётчиков символов)
     TITLE_LIMIT = 100
     TEXT_LIMIT = 800
 
@@ -92,7 +91,7 @@ class PinterestAdapter(PlatformAdapter):
         except requests.RequestException as exc:
             log_event("pinterest", f"Сетевая ошибка: {exc}", "ERROR")
             return PublishResult(ok=False, error=f"сетевая ошибка: {exc}")
-        except Exception as exc:  # noqa: BLE001 — ошибка одной площадки не должна ронять остальные
+        except Exception as exc:  # noqa: BLE001
             log_event("pinterest", f"Неожиданная ошибка: {exc}", "ERROR")
             return PublishResult(ok=False, error=str(exc))
 

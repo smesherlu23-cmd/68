@@ -10,7 +10,6 @@ from __future__ import annotations
 
 _DEFAULT_PORT = 993
 
-# домен почты → (IMAP-хост, порт)
 _PROVIDERS: dict[str, tuple[str, int]] = {
     "gmail.com": ("imap.gmail.com", 993),
     "googlemail.com": ("imap.gmail.com", 993),

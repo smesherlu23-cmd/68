@@ -9,7 +9,7 @@ from .paths import data_dir
 
 _LOG_FILE = data_dir() / "centurio.log"
 
-_db = None  # ленивo подключается из database.Database, чтобы избежать цикла импортов
+_db = None
 
 
 def bind_database(db) -> None:

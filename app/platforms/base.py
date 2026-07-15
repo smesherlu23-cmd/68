@@ -23,13 +23,13 @@ class PublishResult:
 @dataclass
 class CredentialField:
     """Описание одного секрета аккаунта (для формы подключения в настройках)."""
-    key: str               # суффикс имени секрета: "token", "blog", …
-    label: str             # подпись поля
-    password: bool = False # скрывать ли ввод
-    hint: str = ""         # подсказка/пример
-    auto_managed: bool = False  # заполняется автоматически — не показывать в форме
-    optional: bool = False      # не обязателен для готовности аккаунта
-    advanced: bool = False       # прячется в блок «Дополнительно» формы
+    key: str
+    label: str
+    password: bool = False
+    hint: str = ""
+    auto_managed: bool = False
+    optional: bool = False
+    advanced: bool = False
 
 
 @dataclass
@@ -43,9 +43,9 @@ class PreviewData:
 
 
 class PlatformAdapter(ABC):
-    key: str = ""          # машинное имя: "pinterest", "boosty"
-    name: str = ""         # отображаемое имя
-    letter: str = ""       # буква для иконки в UI
+    key: str = ""
+    name: str = ""
+    letter: str = ""
 
     def credential_fields(self) -> list[CredentialField]:
         """Секреты, которые нужно задать для аккаунта этой площадки."""

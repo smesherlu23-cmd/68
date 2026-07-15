@@ -46,8 +46,6 @@ class SettingsView:
                 padding=ft.padding.symmetric(26, 30), expand=True, width=820),
         ], spacing=0, expand=True)
 
-    # ---------- карточки ----------
-
     def _account_card(self, adapter, account) -> ft.Container:
         ready = self.app.accounts.is_ready(account)
         status = (ui.status_dot(th.SUCCESS, "Ключи заданы", th.SUCCESS_TEXT)
@@ -112,8 +110,6 @@ class SettingsView:
             ], spacing=16),
             bgcolor=th.BG_CARD, border=ft.border.all(1, th.BORDER_CARD),
             border_radius=12, padding=ft.padding.symmetric(18, 20))
-
-    # ---------- диалоги ----------
 
     @staticmethod
     def _derive_name(values: dict[str, str]) -> str:

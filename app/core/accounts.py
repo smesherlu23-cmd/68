@@ -21,8 +21,6 @@ class AccountService:
     def __init__(self, db: Database):
         self.db = db
 
-    # ---------- метаданные ----------
-
     def list(self, platform: Optional[str] = None) -> list[Account]:
         return self.db.accounts(platform)
 
@@ -50,8 +48,6 @@ class AccountService:
             secrets.delete_secret(secrets.account_secret(account_id, field.key))
         self.db.delete_account(account_id)
         log_event("accounts", f"Удалён аккаунт «{account.name}»")
-
-    # ---------- секреты доступа ----------
 
     def set_credentials(self, account_id: str, values: dict[str, str]) -> None:
         for key, value in values.items():

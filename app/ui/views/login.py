@@ -64,7 +64,6 @@ class LoginView:
             padding=ft.padding.symmetric(34, 34),
             shadow=ui.card_shadow(0.5))
 
-        # мягкий «прожектор» под карточкой входа — глубина без цветового шума
         return ft.Container(
             content=card, alignment=ft.alignment.center, expand=True,
             gradient=ft.RadialGradient(center=ft.alignment.center, radius=1.1,

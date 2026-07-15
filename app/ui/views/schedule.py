@@ -92,8 +92,6 @@ class ScheduleView:
             c, "border", ft.border.all(1, th.white(0.14 if h else 0.08))))
         return row
 
-    # ---------- изменение времени ----------
-
     def _edit(self, post: Post) -> None:
         self._edit_post = post
         self._new_date = post.scheduled_at.date()

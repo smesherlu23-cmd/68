@@ -40,7 +40,7 @@ def main(page: ft.Page) -> None:
         page.window.title_bar_hidden = True
         page.window.center()
     except Exception:
-        pass  # веб-режим или платформа без управления окном
+        pass
 
     def on_disconnect(_):
         scheduler.shutdown()
