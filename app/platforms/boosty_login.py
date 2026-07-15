@@ -47,6 +47,34 @@ _SUBMIT_HINTS = ["войти", "продолжить", "log in", "sign in", "con
 
 _CODE_RE = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
 
+_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) "
+               "Chrome/125.0.0.0 Safari/537.36")
+
+_STEALTH_JS = """
+    try {
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+    } catch (e) {}
+    try {
+        Object.defineProperty(navigator, 'languages',
+            {get: () => ['ru-RU', 'ru', 'en-US', 'en']});
+    } catch (e) {}
+    try {
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+    } catch (e) {}
+    try {
+        window.chrome = window.chrome || {runtime: {}};
+        const _query = window.navigator.permissions &&
+            window.navigator.permissions.query;
+        if (_query) {
+            window.navigator.permissions.query = (params) =>
+                params && params.name === 'notifications'
+                    ? Promise.resolve({state: Notification.permission})
+                    : _query(params);
+        }
+    } catch (e) {}
+"""
+
 
 class BoostyLoginError(RuntimeError):
     """Автоматический вход не удался (форма, почта или таймаут)."""
@@ -67,7 +95,15 @@ def _launch_browser(pw, debug: bool = False):
     не проходит), откатываемся на уже установленные в системе Microsoft Edge и
     Google Chrome — их скачивать не нужно. Канал можно жёстко задать через
     переменную окружения CENTURIO_BROWSER_CHANNEL (chromium/msedge/chrome)."""
-    base: dict = {"headless": not debug}
+    base: dict = {
+        "headless": not debug,
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--lang=ru-RU",
+        ],
+    }
     if debug:
         base["slow_mo"] = 300
     forced = os.environ.get("CENTURIO_BROWSER_CHANNEL", "").strip().lower()
@@ -93,7 +129,8 @@ def _launch_browser(pw, debug: bool = False):
 
 def _collect_diag(page, context) -> dict:
     """Снимок состояния страницы для диагностики неудачного автовхода."""
-    diag: dict = {"url": "", "title": "", "cookies": [], "storage_keys": []}
+    diag: dict = {"url": "", "title": "", "cookies": [],
+                  "storage_keys": [], "session_keys": []}
     try:
         diag["url"] = page.url
     except Exception:  # noqa: BLE001
@@ -111,14 +148,21 @@ def _collect_diag(page, context) -> dict:
             "() => Object.keys(window.localStorage)")
     except Exception:  # noqa: BLE001
         pass
+    try:
+        diag["session_keys"] = page.evaluate(
+            "() => Object.keys(window.sessionStorage)")
+    except Exception:  # noqa: BLE001
+        pass
     return diag
 
 
 def _diag_summary(diag: dict) -> str:
     cookies = ", ".join(diag.get("cookies") or []) or "нет"
     keys = ", ".join(diag.get("storage_keys") or []) or "нет"
+    session = ", ".join(diag.get("session_keys") or []) or "нет"
     return (f"Итоговая страница: {diag.get('url') or '?'}; "
-            f"cookies: {cookies}; localStorage: {keys}.")
+            f"cookies: {cookies}; localStorage: {keys}; "
+            f"sessionStorage: {session}.")
 
 
 def _dump_debug(page, diag: dict, form_html: str = "") -> None:
@@ -145,7 +189,8 @@ def _dump_debug(page, diag: dict, form_html: str = "") -> None:
             f"url: {diag.get('url')}\n"
             f"title: {diag.get('title')}\n"
             f"cookies: {diag.get('cookies')}\n"
-            f"localStorage: {diag.get('storage_keys')}\n",
+            f"localStorage: {diag.get('storage_keys')}\n"
+            f"sessionStorage: {diag.get('session_keys')}\n",
             encoding="utf-8")
         log_event("boosty", f"Диагностика автовхода сохранена в {out}")
     except Exception as exc:  # noqa: BLE001
@@ -173,17 +218,35 @@ def auto_login(login_email: str, login_password: str,
             return
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
-            captured["token"] = auth.split(" ", 1)[1]
+            token = auth.split(" ", 1)[1].strip()
+            if len(token) > 20:
+                captured["token"] = token
 
     def on_response(response) -> None:
-        if "blog" in captured or "api.boosty.to" not in response.url:
+        url = response.url
+        if "api.boosty.to" not in url:
+            return
+        if "token" in captured and "blog" in captured:
+            return
+        if "application/json" not in response.headers.get("content-type", ""):
             return
         try:
-            blog = _find_blog(response.json())
+            data = response.json()
         except Exception:  # noqa: BLE001
             return
-        if blog:
-            captured["blog"] = blog
+        # Токен из тела берём только у auth-эндпоинтов (иначе можно поймать
+        # чужое поле "token" из обычного ответа API); заголовок Authorization
+        # (on_request) остаётся приоритетным источником.
+        auth_endpoint = any(m in url.lower()
+                            for m in ("oauth", "auth", "login", "session"))
+        if "token" not in captured and auth_endpoint:
+            token = _find_token(data)
+            if token:
+                captured["token"] = token
+        if "blog" not in captured:
+            blog = _find_blog(data)
+            if blog:
+                captured["blog"] = blog
 
     debug = _debug_enabled()
     diag: dict = {}
@@ -191,10 +254,21 @@ def auto_login(login_email: str, login_password: str,
     with sync_playwright() as pw:
         browser = _launch_browser(pw, debug=debug)
         try:
-            context = browser.new_context()
+            context = browser.new_context(
+                locale="ru-RU",
+                timezone_id="Europe/Moscow",
+                viewport={"width": 1366, "height": 768},
+                user_agent=_USER_AGENT,
+                extra_http_headers={
+                    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
+            )
+            try:
+                context.add_init_script(_STEALTH_JS)
+            except Exception:  # noqa: BLE001
+                pass
+            context.on("request", on_request)
+            context.on("response", on_response)
             page = context.new_page()
-            page.on("request", on_request)
-            page.on("response", on_response)
 
             page.goto(SITE_URL, wait_until="networkidle", timeout=timeout_ms)
             _click_test_id(page, GDPR_ACCEPT_TID)
@@ -229,6 +303,13 @@ def auto_login(login_email: str, login_password: str,
                 page.goto(HOME_URL, wait_until="networkidle", timeout=timeout_ms)
             except Exception:  # noqa: BLE001
                 page.wait_for_timeout(3000)
+            if "token" not in captured:
+                page.wait_for_timeout(1500)
+            if "token" not in captured:
+                try:
+                    page.reload(wait_until="networkidle", timeout=timeout_ms)
+                except Exception:  # noqa: BLE001
+                    page.wait_for_timeout(2000)
             if "token" not in captured:
                 found = (_token_from_cookies(context.cookies())
                          or _token_from_storage(page))
@@ -423,24 +504,33 @@ def _fetch_blog_via_api(token: str) -> str:
 
 
 def _token_from_storage(page) -> str:
-    """Резервный способ достать токен: типичные ключи localStorage SPA-клиентов."""
+    """Резервный способ достать токен: типичные ключи local/sessionStorage
+    SPA-клиентов (Boosty может держать сессию в любом из них)."""
     script = """
         () => {
             const jwtLike = /^[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+$/;
-            for (const key of Object.keys(window.localStorage)) {
-                const raw = window.localStorage.getItem(key);
-                if (!raw) continue;
-                if (jwtLike.test(raw)) return raw;
-                try {
-                    const parsed = JSON.parse(raw);
-                    if (parsed && typeof parsed === 'object') {
-                        for (const field of ['accessToken', 'access_token', 'token']) {
-                            if (typeof parsed[field] === 'string' && parsed[field]) {
-                                return parsed[field];
+            const stores = [window.localStorage, window.sessionStorage];
+            for (const store of stores) {
+                if (!store) continue;
+                for (const key of Object.keys(store)) {
+                    const raw = store.getItem(key);
+                    if (!raw) continue;
+                    if (jwtLike.test(raw) && raw.length > 20) return raw;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        const stack = [parsed];
+                        while (stack.length) {
+                            const cur = stack.pop();
+                            if (!cur || typeof cur !== 'object') continue;
+                            for (const f of ['accessToken', 'access_token',
+                                             'token', 'bearer']) {
+                                if (typeof cur[f] === 'string' &&
+                                    cur[f].length > 20) return cur[f];
                             }
+                            for (const v of Object.values(cur)) stack.push(v);
                         }
-                    }
-                } catch (e) { /* не JSON — пропускаем */ }
+                    } catch (e) { /* не JSON — пропускаем */ }
+                }
             }
             return '';
         }
