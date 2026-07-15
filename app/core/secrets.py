@@ -25,8 +25,7 @@ try:
     import keyring
     from keyring.errors import KeyringError
 
-    try:  # проверяем, что бэкенд реально работает (ловим и BaseException:
-        # сломанные нативные бэкенды падают с PanicException)
+    try:
         keyring.get_password(_SERVICE, "__probe__")
         _KEYRING_OK = True
     except BaseException:  # noqa: BLE001

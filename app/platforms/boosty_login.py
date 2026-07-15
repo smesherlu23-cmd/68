@@ -36,7 +36,6 @@ LOGIN_URL = "https://boosty.to/app/login"
 HOME_URL = "https://boosty.to/app"
 CURRENT_USER_URL = "https://api.boosty.to/v1/user/current"
 
-# стабильные якоря разметки Boosty (data-test-id)
 GDPR_ACCEPT_TID = "GDPROFFER:ACCEPT_BUTTON"
 SIGN_IN_TID = "COMMON_TOPMENU_TOPMENURIGHTUNAUTHORIZED:SIGN_IN"
 
@@ -83,7 +82,7 @@ def _launch_browser(pw, debug: bool = False):
     for kwargs in attempts:
         try:
             return pw.chromium.launch(**base, **kwargs)
-        except Exception as exc:  # noqa: BLE001 — пробуем следующий браузер
+        except Exception as exc:  # noqa: BLE001
             last_exc = exc
     raise BoostyLoginError(
         "не удалось запустить браузер для автовхода. Установите браузер "
@@ -131,16 +130,16 @@ def _dump_debug(page, diag: dict, form_html: str = "") -> None:
         out.mkdir(parents=True, exist_ok=True)
         try:
             page.screenshot(path=str(out / "login.png"), full_page=True)
-        except Exception:  # noqa: BLE001 — скриншот не критичен
+        except Exception:  # noqa: BLE001
             pass
         try:
             (out / "page.html").write_text(page.content(), encoding="utf-8")
-        except Exception:  # noqa: BLE001 — HTML не критичен
+        except Exception:  # noqa: BLE001
             pass
         if form_html:
             try:
                 (out / "form.html").write_text(form_html, encoding="utf-8")
-            except Exception:  # noqa: BLE001 — снимок формы не критичен
+            except Exception:  # noqa: BLE001
                 pass
         (out / "login.txt").write_text(
             f"url: {diag.get('url')}\n"
@@ -181,7 +180,7 @@ def auto_login(login_email: str, login_password: str,
             return
         try:
             blog = _find_blog(response.json())
-        except Exception:  # noqa: BLE001 — не JSON или недоступно
+        except Exception:  # noqa: BLE001
             return
         if blog:
             captured["blog"] = blog
@@ -197,23 +196,17 @@ def auto_login(login_email: str, login_password: str,
             page.on("request", on_request)
             page.on("response", on_response)
 
-            # На /app форма входа не отрисована — открываем модалку логина:
-            # заходим на сайт, убираем баннер cookie (перекрывает клики) и
-            # жмём кнопку «Log in» в шапке. Поля появляются только после этого.
             page.goto(SITE_URL, wait_until="networkidle", timeout=timeout_ms)
             _click_test_id(page, GDPR_ACCEPT_TID)
             if not _click_test_id(page, SIGN_IN_TID):
-                # запасной путь, если шапка изменилась — прямой URL логина
                 page.goto(LOGIN_URL, wait_until="networkidle", timeout=timeout_ms)
             _wait_for_any_input(page, timeout_ms=15_000)
             try:
                 form_html = page.content()
-            except Exception:  # noqa: BLE001 — снимок формы не критичен
+            except Exception:  # noqa: BLE001
                 pass
 
             _fill_by_hints(page, "input", _EMAIL_HINTS, login_email)
-            # Форма Boosty бывает многошаговой: email → «Продолжить» → пароль.
-            # Если поля пароля ещё нет, отправляем email и ждём его появления.
             if not _fill_by_hints(page, "input[type=password]", _PASSWORD_HINTS,
                                    login_password):
                 _click_by_hints(page, _SUBMIT_HINTS)
@@ -232,16 +225,11 @@ def auto_login(login_email: str, login_password: str,
                 code_input.fill(code)
                 _click_by_hints(page, _SUBMIT_HINTS)
 
-            # заходим на главную приложения — она подгружает данные текущего
-            # пользователя (в т.ч. блог) с заголовком Authorization
             try:
                 page.goto(HOME_URL, wait_until="networkidle", timeout=timeout_ms)
-            except Exception:  # noqa: BLE001 — навигация не критична
+            except Exception:  # noqa: BLE001
                 page.wait_for_timeout(3000)
             if "token" not in captured:
-                # Boosty держит сессию в cookie `auth` (JSON с accessToken),
-                # а не только в заголовке Authorization — пробуем cookie и
-                # localStorage как запасные источники токена
                 found = (_token_from_cookies(context.cookies())
                          or _token_from_storage(page))
                 if found:
@@ -250,8 +238,6 @@ def auto_login(login_email: str, login_password: str,
             cookie_header = "; ".join(f"{c['name']}={c['value']}"
                                       for c in context.cookies())
             diag = _collect_diag(page, context)
-            # при неудаче всегда сохраняем дамп (скриншот + HTML формы логина) —
-            # по нему видно реальную разметку модалки, чинить можно не вслепую
             if debug or "token" not in captured:
                 _dump_debug(page, diag, form_html)
         finally:
@@ -274,8 +260,6 @@ def auto_login(login_email: str, login_password: str,
               + (f", блог: {blog}" if blog else ""))
     return token, cookie_header, blog
 
-
-# ---------- взаимодействие со страницей ----------
 
 def _visible_attrs(el) -> str:
     return " ".join(filter(None, [
@@ -466,8 +450,6 @@ def _token_from_storage(page) -> str:
     except Exception:
         return ""
 
-
-# ---------- получение кода подтверждения по почте ----------
 
 def _fetch_verification_code(host: str, port: int, user: str, password: str,
                              since_ts: float, timeout: float = 90,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import flet as ft
 
-# фоны
 BG_WINDOW = "#0d0d0f"
 BG_SIDEBAR = "#0a0a0c"
 BG_TITLEBAR = "#141416"
@@ -14,7 +13,6 @@ BG_INPUT_NESTED = "#0e0e10"
 BG_ACTIONBAR = "#0b0b0d"
 BG_DIALOG = "#141416"
 
-# текст
 TEXT = "#f1f1f3"
 TEXT_SOFT = "#e2e2e6"
 TEXT_MUTED = "#c4c4c9"
@@ -25,8 +23,7 @@ TEXT_LABEL = "#6a6a70"
 TEXT_DIM = "#5a5a60"
 TEXT_GHOST = "#3a3a40"
 
-# акценты
-ACCENT = "#ececef"          # светлые кнопки и тумблеры
+ACCENT = "#ececef"
 ACCENT_FG = "#0d0d0f"
 SUCCESS = "#3ddc97"
 SUCCESS_TEXT = "#a4d4b0"
@@ -35,12 +32,10 @@ ERROR = "#e08a6a"
 ERROR_TEXT = "#d6a892"
 ERROR_TEXT2 = "#e0b0a4"
 
-# шрифты: аналоги Space Grotesk / Space Mono из макета с поддержкой кириллицы
 FONT_HEAD = "Onest"
 FONT_BODY = "Manrope"
 FONT_MONO = "JetBrains Mono"
 
-# шрифты поставляются вместе с приложением (assets/fonts) — работает офлайн
 FONTS = {
     FONT_HEAD: "/fonts/Onest.ttf",
     FONT_BODY: "/fonts/Manrope.ttf",
@@ -58,7 +53,6 @@ BORDER_INPUT = white(0.09)
 BORDER_STRONG = white(0.12)
 BORDER_DASHED = white(0.14)
 
-# мягкое свечение фирменной точки-акцента (белый гало на тёмном фоне)
 GLOW_ACCENT = white(0.4)
 
 
@@ -69,7 +63,7 @@ def apply(page: ft.Page) -> None:
     page.theme_mode = ft.ThemeMode.DARK
     page.theme = ft.Theme(
         font_family=FONT_BODY,
-        color_scheme_seed="#ececef",  # монохромная палитра системных виджетов
+        color_scheme_seed="#ececef",
         scrollbar_theme=ft.ScrollbarTheme(
             thumb_color=white(0.12),
             track_color=ft.Colors.TRANSPARENT,

@@ -38,8 +38,6 @@ class CenturioApp:
         self.content_slot = ft.Container(expand=True)
         self.overlay_slot = ft.Container(visible=False, expand=True)
 
-    # ---------- жизненный цикл ----------
-
     def mount(self) -> None:
         if self.auth.is_configured() and not getattr(self, "_logged_in", False):
             self._show_login()
@@ -82,8 +80,6 @@ class CenturioApp:
         if e.key == "Enter" and (e.ctrl or e.meta):
             if self.nav == "compose" and not self.overlay_slot.visible:
                 self.compose._publish_clicked(None)
-
-    # ---------- тайтлбар ----------
 
     def _titlebar(self) -> ft.Control:
         def win_btn(icon: str, on_click, size: int = 14,
@@ -129,8 +125,6 @@ class CenturioApp:
             bgcolor=th.BG_TITLEBAR,
             border=ft.border.only(bottom=ft.BorderSide(1, th.BORDER_SOFT)))
         return ft.WindowDragArea(content=bar)
-
-    # ---------- сайдбар ----------
 
     def _sidebar(self) -> ft.Container:
         items: list[ft.Control] = []
@@ -228,8 +222,6 @@ class CenturioApp:
             except Exception:
                 pass
 
-    # ---------- навигация ----------
-
     def set_nav(self, key: str, update: bool = True) -> None:
         self.nav = key
         for k, item in self._nav_items.items():
@@ -253,8 +245,6 @@ class CenturioApp:
         self.refresh_sidebar(update=False)
         if update:
             self.page.update()
-
-    # ---------- оверлеи и уведомления ----------
 
     def show_overlay(self, control: ft.Control) -> None:
         wrapper = ft.Container(

@@ -32,8 +32,6 @@ class BoostyAdapter(PlatformAdapter):
     letter = "B"
 
     def credential_fields(self) -> list[CredentialField]:
-        # Для нового аккаунта достаточно email и пароля Boosty — всё остальное
-        # (токен, имя блога, параметры IMAP, логин почты) определяется само.
         return [
             CredentialField("token", "Bearer-токен сессии", password=True,
                             auto_managed=True),
@@ -44,7 +42,6 @@ class BoostyAdapter(PlatformAdapter):
                             password=True, optional=True,
                             hint="нужен, если у почты включена 2FA; "
                                  "иначе оставьте пустым"),
-            # дополнительно — обычно определяется автоматически
             CredentialField("blog", "Имя блога (boosty.to/имя)",
                             optional=True, advanced=True,
                             hint="определяется автоматически после входа"),
@@ -74,8 +71,6 @@ class BoostyAdapter(PlatformAdapter):
         token = self._cred(account.id, "token")
         blog = self._cred(account.id, "blog")
         if not token or not blog:
-            # чего-то не хватает (первая публикация или истёк токен) —
-            # автовход добудет и токен, и имя блога автоматически
             if not self.auto_login_configured(account.id):
                 return PublishResult(
                     ok=False, error="не настроен вход в Boosty (email и пароль)")
@@ -94,7 +89,6 @@ class BoostyAdapter(PlatformAdapter):
         if not expired:
             return result
 
-        # токен истёк — обновляем его автовходом и повторяем публикацию
         ok, message = self.auto_login(account.id)
         if not ok:
             log_event("boosty", f"Токен истёк, автовход не выполнен: {message}",
@@ -132,11 +126,9 @@ class BoostyAdapter(PlatformAdapter):
         except requests.RequestException as exc:
             log_event("boosty", f"Сетевая ошибка: {exc}", "ERROR")
             return PublishResult(ok=False, error=f"сетевая ошибка: {exc}"), False
-        except Exception as exc:  # noqa: BLE001 — ошибка одной площадки не должна ронять остальные
+        except Exception as exc:  # noqa: BLE001
             log_event("boosty", f"Неожиданная ошибка: {exc}", "ERROR")
             return PublishResult(ok=False, error=str(exc)), False
-
-    # ---------- автовход с email-2FA ----------
 
     def _cred(self, account_id: str, key: str) -> str:
         return secrets.get_secret(secrets.account_secret(account_id, key)) or ""
@@ -183,7 +175,7 @@ class BoostyAdapter(PlatformAdapter):
         except boosty_login.BoostyLoginError as exc:
             log_event("boosty", f"Автовход не выполнен: {exc}", "ERROR")
             return False, str(exc)
-        except Exception as exc:  # noqa: BLE001 — не должно ронять публикацию
+        except Exception as exc:  # noqa: BLE001
             log_event("boosty", f"Автовход: неожиданная ошибка: {exc}", "ERROR")
             return False, str(exc)
 

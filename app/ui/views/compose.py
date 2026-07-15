@@ -36,8 +36,6 @@ class ComposeView:
         self._build_controls()
         self._select_all_ready(update=False)
 
-    # ---------- состояние ----------
-
     def _platform_accounts(self) -> list:
         return self.app.accounts.list(self.platform)
 
@@ -73,12 +71,9 @@ class ComposeView:
         ok = bool(post.accounts) and not missing
         return missing, ok
 
-    # ---------- сборка ----------
-
     def _build_controls(self) -> None:
         on_change = lambda e: self.refresh()  # noqa: E731
 
-        # контент
         self.f_title = ui.text_field("Заголовок поста", size=16,
                                      weight=ft.FontWeight.W_600, on_change=on_change)
         self.f_text = ui.text_field("Текст / описание…", multiline=True,
@@ -88,7 +83,6 @@ class ComposeView:
         self.text_counter = ft.Text("", size=11, color=th.TEXT_DIM,
                                     font_family=th.FONT_MONO)
 
-        # медиа
         self.picker = ft.FilePicker(on_result=self._media_picked)
         self.media_row = ft.Row(spacing=12, wrap=True, run_spacing=12)
         self.media_count = ft.Text("", size=12, color=th.TEXT_FAINT)
@@ -101,13 +95,11 @@ class ComposeView:
                     size=12, color=th.ERROR_TEXT),
         ], spacing=6, tight=True, visible=False)
 
-        # параметры Pinterest
         self.f_link = ui.text_field("https://…", nested=True, mono=True,
                                     size=12.5, on_change=on_change)
         self.f_board = ui.text_field("Название доски", nested=True,
                                      size=12.5, on_change=on_change)
 
-        # динамические секции
         self.platform_row = ft.Row(spacing=12, wrap=True, run_spacing=12)
         self.accounts_holder = ft.Column(spacing=10)
         self.accounts_summary = ft.Text("", size=12, color=th.TEXT_FAINT)
@@ -116,7 +108,6 @@ class ComposeView:
         self.preview_platform_label = ui.mono_label("Предпросмотр")
         self.preview_targets = ft.Text("", size=12, color=th.TEXT_FAINT)
 
-        # панель действий
         self.tg_schedule = ui.PillToggle(False, self._toggle_schedule)
         self.date_btn = self._dt_field(self._pick_date, ft.Icons.CALENDAR_TODAY_OUTLINED)
         self.time_btn = self._dt_field(self._pick_time, ft.Icons.SCHEDULE)
@@ -136,7 +127,6 @@ class ComposeView:
             on_click=self._publish_clicked, animate_opacity=120,
             tooltip="Ctrl+Enter")
 
-        # индикатор шагов
         self.steps: list[tuple[ft.Container, ft.Text, ft.Text]] = []
 
     def _pin_params_card(self) -> ft.Container:
@@ -225,8 +215,6 @@ class ComposeView:
             padding=ft.padding.only(30, 20, 30, 18),
             border=ft.border.only(bottom=ft.BorderSide(1, th.BORDER_SOFT)),
         )
-
-    # ----- левая колонка -----
 
     def _editor(self) -> ft.Container:
         upload_box = ft.Container(
@@ -355,8 +343,6 @@ class ComposeView:
             row.opacity = 0.75
         return row
 
-    # ----- правая колонка: предпросмотр -----
-
     def _preview_panel(self) -> ft.Container:
         return ft.Container(
             content=ft.Column([
@@ -481,8 +467,6 @@ class ComposeView:
             border=ft.border.all(1, th.BORDER_INPUT),
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS)
 
-    # ----- панель действий -----
-
     def _action_bar(self) -> ft.Container:
         draft_btn = ui.ghost_button("Черновик", self._save_draft,
                                     padding=ft.padding.symmetric(12, 18))
@@ -502,8 +486,6 @@ class ComposeView:
             ], spacing=18),
             padding=ft.padding.symmetric(15, 30), bgcolor=th.BG_ACTIONBAR,
             border=ft.border.only(top=ft.BorderSide(1, th.BORDER_SOFT)))
-
-    # ---------- обработчики ----------
 
     def _select_platform(self, key: str) -> None:
         if key == self.platform:
@@ -587,8 +569,6 @@ class ComposeView:
         self.app.service.save_draft(post)
         self.app.snack("Черновик сохранён")
 
-    # ---------- перерисовка ----------
-
     def refresh(self, update: bool = True) -> None:
         adapter = get_adapter(self.platform) if self.platform else None
         accounts = self._platform_accounts()
@@ -596,11 +576,9 @@ class ComposeView:
         selected_ready = self.current_post().accounts
         n_sel = len(selected_ready)
 
-        # 1 · платформы
         self.platform_row.controls = [
             self._platform_card(a, a.key == self.platform) for a in all_adapters()]
 
-        # 2 · аккаунты
         self.accounts_summary.value = (
             f"{n_sel} из {len(accounts)} выбрано" if accounts else "Нет аккаунтов")
         if accounts:
@@ -611,7 +589,6 @@ class ComposeView:
             self.accounts_holder.controls[0].on_click = (
                 lambda e: self.app.set_nav("settings"))
 
-        # 3 · контент
         self.pin_params.visible = self.platform == "pinterest"
         self._refresh_counters()
         self._refresh_media_row()
@@ -619,7 +596,6 @@ class ComposeView:
             self.platform == "pinterest" and n_sel
             and not get_adapter("pinterest").has_image(self.current_post()))
 
-        # предпросмотр
         self.preview_platform_label.value = (
             f"ПРЕДПРОСМОТР · {adapter.name}".upper() if adapter else "ПРЕДПРОСМОТР")
         self.preview_targets.value = (
@@ -640,12 +616,10 @@ class ComposeView:
 
         self._refresh_steps(can_publish, n_sel)
 
-        # планирование
         self.dt_row.visible = self.schedule_on
         self.date_btn.content.controls[1].value = self.sched_date.strftime("%d.%m.%Y")
         self.time_btn.content.controls[1].value = self.sched_time.strftime("%H:%M")
 
-        # подсказка и кнопка
         summary = f"{n_sel} {self._plural_accounts(n_sel)}"
         if not accounts:
             self.hint_text.value = "Добавьте аккаунт в настройках"
@@ -772,8 +746,6 @@ class ComposeView:
         self._select_all_ready(update=False)
         self.refresh(update=False)
 
-    # ---------- публикация ----------
-
     def _publish_clicked(self, _) -> None:
         missing, can_publish = self._validity()
         if not can_publish:
@@ -789,8 +761,6 @@ class ComposeView:
             self._show_scheduled_overlay(when, post)
         else:
             self._start_publish(post)
-
-    # --- оверлей «Публикуем в аккаунты» ---
 
     def _start_publish(self, post: Post) -> None:
         self._pub_post = post
@@ -934,8 +904,6 @@ class ComposeView:
             self.app.page.update()
         except Exception:
             pass
-
-    # --- оверлеи «готово» и «запланировано» ---
 
     def _show_done_overlay(self) -> None:
         count = len(self._pub_state)

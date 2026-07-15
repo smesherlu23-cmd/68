@@ -16,16 +16,13 @@ from .database import Database
 from .logger import log_event
 from .models import Account, Post, PostStatus, PublicationStatus
 
-# колбэк прогресса: (account_id, status, error)
 ProgressFn = Callable[[str, str, str], None]
 
 
 class CrosspostService:
     def __init__(self, db: Database):
         self.db = db
-        self.scheduler = None  # связывается из scheduler.bind()
-
-    # ---------- публикация ----------
+        self.scheduler = None
 
     def _post_accounts(self, post: Post) -> list[Account]:
         """Аккаунты поста в порядке выбора (пропуская удалённые)."""
@@ -107,8 +104,6 @@ class CrosspostService:
             status = PostStatus.ERROR
         self.db.set_post_status(post_id, status)
 
-    # ---------- отложенный постинг ----------
-
     def schedule_post(self, post: Post, when: datetime) -> Post:
         post.status = PostStatus.SCHEDULED
         post.scheduled_at = when
@@ -141,8 +136,6 @@ class CrosspostService:
             return
         log_event("scheduler", f"Наступило время публикации поста #{post_id}")
         self.publish_now(post)
-
-    # ---------- черновики ----------
 
     def save_draft(self, post: Post) -> Post:
         post.status = PostStatus.DRAFT
