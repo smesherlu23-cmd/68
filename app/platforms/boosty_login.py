@@ -32,8 +32,10 @@ import requests
 from ..core.logger import log_event
 
 SITE_URL = "https://boosty.to/"
-LOGIN_URL = "https://boosty.to/app/login"
-HOME_URL = "https://boosty.to/app"
+# Вход у Boosty — модалка на главной; отдельной страницы логина нет.
+# boosty.to/<slug> — это блог, поэтому /app и /app/login дают «Blog not found»;
+# авторизованная «домашняя» — это лента на самом boosty.to/.
+HOME_URL = "https://boosty.to/"
 CURRENT_USER_URL = "https://api.boosty.to/v1/user/current"
 
 GDPR_ACCEPT_TID = "GDPROFFER:ACCEPT_BUTTON"
@@ -44,6 +46,12 @@ _PASSWORD_HINTS = ["пароль", "password"]
 _CODE_HINTS = ["код", "code", "подтвержд", "verif"]
 _SUBMIT_HINTS = ["войти", "продолжить", "log in", "sign in", "continue",
                  "далее", "подтвердить", "confirm"]
+# Кнопки, раскрывающие ввод e-mail на первом (выбор способа) шаге модалки.
+_EMAIL_METHOD_HINTS = ["e-mail", "email", "почт", "по e-mail", "по электронной",
+                       "continue with e-mail", "войти по"]
+# Тексты кнопок согласия на баннере cookie/GDPR (перекрывает клик по «Войти»).
+_COOKIE_ACCEPT_HINTS = ["принять", "принимаю", "accept", "согласен", "разрешить",
+                        "хорошо", "ок", "ok", "got it", "allow"]
 
 _CODE_RE = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
 
@@ -271,14 +279,15 @@ def auto_login(login_email: str, login_password: str,
             page = context.new_page()
 
             page.goto(SITE_URL, wait_until="networkidle", timeout=timeout_ms)
-            _click_test_id(page, GDPR_ACCEPT_TID)
-            if not _click_test_id(page, SIGN_IN_TID):
-                page.goto(LOGIN_URL, wait_until="networkidle", timeout=timeout_ms)
-            _wait_for_any_input(page, timeout_ms=15_000)
+            opened = _open_login_form(page, timeout_ms=25_000)
             try:
                 form_html = page.content()
             except Exception:  # noqa: BLE001
                 pass
+            if not opened:
+                log_event("boosty", "Автовход: форма входа не открылась "
+                          "(баннер cookie, анти-бот или изменение вёрстки).",
+                          "WARNING")
 
             _fill_by_hints(page, "input", _EMAIL_HINTS, login_email)
             if not _fill_by_hints(page, "input[type=password]", _PASSWORD_HINTS,
@@ -389,6 +398,35 @@ def _click_test_id(page, test_id: str) -> bool:
             return True
     except Exception:  # noqa: BLE001
         pass
+    return False
+
+
+def _dismiss_cookie_banner(page) -> None:
+    """Закрывает баннер cookie/GDPR — он перекрывает клик по кнопке «Войти».
+    Сначала пробуем известный data-test-id, затем кнопку с текстом согласия."""
+    if _click_test_id(page, GDPR_ACCEPT_TID):
+        return
+    _click_by_hints(page, _COOKIE_ACCEPT_HINTS)
+
+
+def _open_login_form(page, timeout_ms: int) -> bool:
+    """Открывает модалку входа Boosty и ждёт появления поля ввода.
+
+    На главной есть SSR-кнопка «Войти» (data-test-id SIGN_IN), но обработчик
+    навешивается только после гидрации React — клик сразу после networkidle
+    часто не открывает модалку. Поэтому кликаем повторно. Модалка вдобавок
+    бывает двухшаговой (выбор способа → поле e-mail): если ввода нет, жмём
+    кнопку «по e-mail». Возвращает True, когда появилось видимое поле."""
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        _dismiss_cookie_banner(page)
+        if not _click_test_id(page, SIGN_IN_TID):
+            _click_by_hints(page, ["войти", "log in", "sign in"])
+        if _wait_for_any_input(page, timeout_ms=4_000):
+            return True
+        if _click_by_hints(page, _EMAIL_METHOD_HINTS):
+            if _wait_for_any_input(page, timeout_ms=4_000):
+                return True
     return False
 
 
