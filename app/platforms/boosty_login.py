@@ -95,7 +95,7 @@ def _debug_enabled() -> bool:
         "1", "true", "yes", "on")
 
 
-def _launch_browser(pw, debug: bool = False):
+def _launch_browser(pw, debug: bool = False, visible: bool = False):
     """Запускает браузер для автовхода (в debug — видимый и с замедлением).
 
     Сначала пробуем Chromium, скачанный Playwright. Если он не установлен
@@ -104,7 +104,7 @@ def _launch_browser(pw, debug: bool = False):
     Google Chrome — их скачивать не нужно. Канал можно жёстко задать через
     переменную окружения CENTURIO_BROWSER_CHANNEL (chromium/msedge/chrome)."""
     base: dict = {
-        "headless": not debug,
+        "headless": not (debug or visible),
         "args": [
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage",
@@ -205,22 +205,41 @@ def _dump_debug(page, diag: dict, form_html: str = "") -> None:
         log_event("boosty", f"Не удалось сохранить диагностику: {exc}", "WARNING")
 
 
-def auto_login(login_email: str, login_password: str,
-                mail_host: str, mail_port: int,
-                mail_user: str, mail_password: str,
-                timeout_ms: int = 45_000) -> tuple[str, str, str]:
-    """Логинится на boosty.to, проходит email-2FA (если запросили), возвращает
-    (bearer_token, cookie_header, blog_name) свежей сессии. blog_name может быть
-    пустым, если определить его не удалось."""
+def _import_playwright():
     try:
         from playwright.sync_api import sync_playwright
+        return sync_playwright
     except ImportError as exc:
         raise BoostyLoginError(
             "не установлен пакет playwright "
             "(pip install playwright && playwright install chromium)") from exc
 
-    captured: dict[str, str] = {}
 
+def _new_context(browser, storage_state: str | None = None):
+    """Контекст с реалистичным отпечатком (локаль/таймзона/UA) и скрытием
+    признаков автоматизации; при наличии storage_state загружает сохранённую
+    сессию (cookie + localStorage)."""
+    kwargs: dict = dict(
+        locale="ru-RU",
+        timezone_id="Europe/Moscow",
+        viewport={"width": 1366, "height": 768},
+        user_agent=_USER_AGENT,
+        extra_http_headers={
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
+    )
+    if storage_state:
+        kwargs["storage_state"] = storage_state
+    context = browser.new_context(**kwargs)
+    try:
+        context.add_init_script(_STEALTH_JS)
+    except Exception:  # noqa: BLE001
+        pass
+    return context
+
+
+def _make_capture(captured: dict):
+    """Колбэки перехвата токена/блога из трафика к api.boosty.to.
+    Приоритетный источник токена — заголовок Authorization исходящих запросов."""
     def on_request(request) -> None:
         if "api.boosty.to" not in request.url:
             return
@@ -242,9 +261,6 @@ def auto_login(login_email: str, login_password: str,
             data = response.json()
         except Exception:  # noqa: BLE001
             return
-        # Токен из тела берём только у auth-эндпоинтов (иначе можно поймать
-        # чужое поле "token" из обычного ответа API); заголовок Authorization
-        # (on_request) остаётся приоритетным источником.
         auth_endpoint = any(m in url.lower()
                             for m in ("oauth", "auth", "login", "session"))
         if "token" not in captured and auth_endpoint:
@@ -256,24 +272,160 @@ def auto_login(login_email: str, login_password: str,
             if blog:
                 captured["blog"] = blog
 
+    return on_request, on_response
+
+
+def _safe_cookies(context) -> list[dict]:
+    try:
+        return context.cookies()
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _cookie_header(context) -> str:
+    return "; ".join(f"{c['name']}={c['value']}" for c in _safe_cookies(context))
+
+
+def _wait_for_token(page, context, captured: dict, timeout_s: float) -> None:
+    """Ждёт появления токена: он ловится колбэками из трафика, а как запасной
+    источник — периодически проверяем cookie `auth` и local/sessionStorage."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline and "token" not in captured:
+        try:
+            page.wait_for_timeout(1000)
+        except Exception:  # noqa: BLE001
+            time.sleep(1)
+        if "token" not in captured:
+            found = (_token_from_cookies(_safe_cookies(context))
+                     or _token_from_storage(page))
+            if found:
+                captured["token"] = found
+
+
+def _click_provider(page, provider: str) -> bool:
+    """Жмёт кнопку входа через соцсеть в модалке Boosty (data-provider=google/
+    twitch/youtube), чтобы сразу перейти к нужному провайдеру."""
+    try:
+        el = page.query_selector(f'[data-provider="{provider}"]')
+        if el is not None and el.is_visible():
+            el.click()
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def assisted_login(session_path: str = "", provider: str = "google",
+                   timeout_s: int = 240) -> tuple[str, str, str]:
+    """Ассистированный вход: открывает ВИДИМЫЙ браузер, пользователь входит сам
+    (Google/соцсеть/телефон) — включая любую 2FA провайдера. Программа лишь
+    открывает модалку, по возможности сразу жмёт нужного провайдера, а затем
+    ждёт, пока появится Bearer-токен сессии Boosty. Токен и cookie/localStorage
+    сохраняются в session_path (storage_state) для дальнейшего автономного
+    обновления. Возвращает (token, cookie_header, blog)."""
+    sync_playwright = _import_playwright()
+    captured: dict[str, str] = {}
+    with sync_playwright() as pw:
+        browser = _launch_browser(pw, visible=True)
+        try:
+            context = _new_context(browser)
+            on_request, on_response = _make_capture(captured)
+            context.on("request", on_request)
+            context.on("response", on_response)
+            page = context.new_page()
+            try:
+                page.goto(SITE_URL, wait_until="domcontentloaded",
+                          timeout=60_000)
+            except Exception:  # noqa: BLE001
+                pass
+            if _open_login_form(page, timeout_ms=25_000):
+                _click_provider(page, provider)
+            log_event("boosty", "Ассистированный вход: ожидаем вход пользователя "
+                      f"через «{provider}» в открытом окне браузера…")
+            _wait_for_token(page, context, captured, timeout_s=timeout_s)
+            if "token" in captured and session_path:
+                try:
+                    context.storage_state(path=session_path)
+                except Exception:  # noqa: BLE001
+                    pass
+            cookie_header = _cookie_header(context)
+            blog = captured.get("blog") or ""
+        finally:
+            browser.close()
+
+    token = captured.get("token")
+    if not token:
+        raise BoostyLoginError(
+            "вход не завершён — токен не получен. В открытом окне войдите в "
+            "Boosty (кнопка Google), затем повторите.")
+    if not blog:
+        blog = _fetch_blog_via_api(token)
+    log_event("boosty", "Ассистированный вход выполнен, сессия сохранена"
+              + (f", блог: {blog}" if blog else ""))
+    return token, cookie_header, blog
+
+
+def silent_login(session_path: str, timeout_ms: int = 45_000
+                 ) -> tuple[str, str, str]:
+    """Тихий (без участия пользователя) вход по сохранённой сессии: headless-
+    браузер с сохранёнными cookie заходит на boosty.to и перехватывает свежий
+    Bearer-токен, попутно обновляя файл сессии. Бросает BoostyLoginError, если
+    сессия истекла и нужен повторный ассистированный вход."""
+    if not session_path or not os.path.exists(session_path):
+        raise BoostyLoginError(
+            "нет сохранённой сессии Boosty — войдите через Google в настройках")
+    sync_playwright = _import_playwright()
+    captured: dict[str, str] = {}
+    with sync_playwright() as pw:
+        browser = _launch_browser(pw, debug=_debug_enabled())
+        try:
+            context = _new_context(browser, storage_state=session_path)
+            on_request, on_response = _make_capture(captured)
+            context.on("request", on_request)
+            context.on("response", on_response)
+            page = context.new_page()
+            try:
+                page.goto(HOME_URL, wait_until="networkidle", timeout=timeout_ms)
+            except Exception:  # noqa: BLE001
+                page.wait_for_timeout(3000)
+            _wait_for_token(page, context, captured, timeout_s=15)
+            if "token" in captured:
+                try:
+                    context.storage_state(path=session_path)
+                except Exception:  # noqa: BLE001
+                    pass
+            cookie_header = _cookie_header(context)
+            blog = captured.get("blog") or ""
+        finally:
+            browser.close()
+
+    token = captured.get("token")
+    if not token:
+        raise BoostyLoginError(
+            "сессия Boosty истекла — войдите заново через Google в настройках")
+    if not blog:
+        blog = _fetch_blog_via_api(token)
+    return token, cookie_header, blog
+
+
+def auto_login(login_email: str, login_password: str,
+                mail_host: str, mail_port: int,
+                mail_user: str, mail_password: str,
+                timeout_ms: int = 45_000) -> tuple[str, str, str]:
+    """Логинится на boosty.to, проходит email-2FA (если запросили), возвращает
+    (bearer_token, cookie_header, blog_name) свежей сессии. blog_name может быть
+    пустым, если определить его не удалось."""
+    sync_playwright = _import_playwright()
+    captured: dict[str, str] = {}
+    on_request, on_response = _make_capture(captured)
+
     debug = _debug_enabled()
     diag: dict = {}
     form_html = ""
     with sync_playwright() as pw:
         browser = _launch_browser(pw, debug=debug)
         try:
-            context = browser.new_context(
-                locale="ru-RU",
-                timezone_id="Europe/Moscow",
-                viewport={"width": 1366, "height": 768},
-                user_agent=_USER_AGENT,
-                extra_http_headers={
-                    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
-            )
-            try:
-                context.add_init_script(_STEALTH_JS)
-            except Exception:  # noqa: BLE001
-                pass
+            context = _new_context(browser)
             context.on("request", on_request)
             context.on("response", on_response)
             page = context.new_page()
@@ -325,8 +477,7 @@ def auto_login(login_email: str, login_password: str,
                 if found:
                     captured["token"] = found
 
-            cookie_header = "; ".join(f"{c['name']}={c['value']}"
-                                      for c in context.cookies())
+            cookie_header = _cookie_header(context)
             diag = _collect_diag(page, context)
             if debug or "token" not in captured:
                 _dump_debug(page, diag, form_html)

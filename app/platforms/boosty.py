@@ -19,6 +19,7 @@ import requests
 
 from ..core import mail_providers, secrets
 from ..core.logger import log_event
+from ..core.paths import data_dir
 from ..core.models import Account, Post
 from . import boosty_login
 from .base import CredentialField, PlatformAdapter, PublishResult
@@ -56,9 +57,12 @@ class BoostyAdapter(PlatformAdapter):
         ]
 
     def account_ready(self, account_id: str) -> bool:
-        """Готов к публикации, если настроен автовход (email + пароль) — тогда
-        токен и имя блога получатся автоматически — либо всё уже задано вручную."""
+        """Готов к публикации, если: токен и имя блога заданы; либо сохранена
+        сессия входа (Google/телефон) — тогда токен обновляется автономно;
+        либо настроен устаревший вход email+пароль."""
         if self._cred(account_id, "token") and self._cred(account_id, "blog"):
+            return True
+        if self._has_session(account_id):
             return True
         return self.auto_login_configured(account_id)
 
@@ -71,13 +75,10 @@ class BoostyAdapter(PlatformAdapter):
         token = self._cred(account.id, "token")
         blog = self._cred(account.id, "blog")
         if not token or not blog:
-            if not self.auto_login_configured(account.id):
-                return PublishResult(
-                    ok=False, error="не настроен вход в Boosty (email и пароль)")
             ok, message = self.auto_login(account.id)
             if not ok:
                 return PublishResult(ok=False,
-                                     error=f"автовход не выполнен: {message}")
+                                     error=f"вход не выполнен: {message}")
             token = self._cred(account.id, "token")
             blog = self._cred(account.id, "blog")
         if not blog:
@@ -157,9 +158,63 @@ class BoostyAdapter(PlatformAdapter):
             port = auto_port
         return host, port, mail_user, mail_password, email
 
+    def _session_path(self, account_id: str):
+        return data_dir() / "boosty_sessions" / f"{account_id}.json"
+
+    def _has_session(self, account_id: str) -> bool:
+        return self._session_path(account_id).exists()
+
+    def _store_session_result(self, account_id: str, token: str,
+                              blog: str) -> None:
+        """Сохраняет полученный токен и, если имя блога ещё не задано, его."""
+        secrets.set_secret(secrets.account_secret(account_id, "token"), token)
+        if blog and not self._cred(account_id, "blog"):
+            secrets.set_secret(secrets.account_secret(account_id, "blog"), blog)
+            log_event("boosty", f"Определён блог аккаунта: {blog}")
+
+    def assisted_login(self, account_id: str,
+                       provider: str = "google") -> tuple[bool, str]:
+        """Ассистированный вход через Google (или другого провайдера): открывает
+        видимый браузер, пользователь входит сам, программа ловит токен и
+        сохраняет сессию для последующего автономного обновления."""
+        path = self._session_path(account_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            token, _cookies, blog = boosty_login.assisted_login(
+                str(path), provider=provider)
+        except boosty_login.BoostyLoginError as exc:
+            log_event("boosty", f"Вход через {provider} не выполнен: {exc}",
+                      "ERROR")
+            return False, str(exc)
+        except Exception as exc:  # noqa: BLE001
+            log_event("boosty", f"Вход через {provider}: неожиданная "
+                      f"ошибка: {exc}", "ERROR")
+            return False, str(exc)
+        self._store_session_result(account_id, token, blog)
+        return True, "Вход через Google выполнен, сессия сохранена"
+
     def auto_login(self, account_id: str) -> tuple[bool, str]:
-        """Проходит вход + email-2FA на boosty.to, сохраняет свежий токен и,
-        если имя блога ещё не задано, определяет и сохраняет его."""
+        """Обновляет токен без участия пользователя. Сначала — по сохранённой
+        сессии (Google/телефон); если её нет — устаревший вход email+пароль."""
+        if self._has_session(account_id):
+            try:
+                token, _cookies, blog = boosty_login.silent_login(
+                    str(self._session_path(account_id)))
+                self._store_session_result(account_id, token, blog)
+                return True, "Токен обновлён из сохранённой сессии"
+            except boosty_login.BoostyLoginError as exc:
+                log_event("boosty", f"Сессия недействительна: {exc}", "WARNING")
+            except Exception as exc:  # noqa: BLE001
+                log_event("boosty", f"Тихий вход: неожиданная ошибка: {exc}",
+                          "ERROR")
+        if self.auto_login_configured(account_id):
+            return self._legacy_email_login(account_id)
+        return False, ("войдите через Google в настройках аккаунта "
+                       "(кнопка «Войти через Google»)")
+
+    def _legacy_email_login(self, account_id: str) -> tuple[bool, str]:
+        """Устаревший вход + email-2FA на boosty.to (Boosty больше не предлагает
+        вход по email/паролю — оставлено для совместимости)."""
         if not self.auto_login_configured(account_id):
             return False, "укажите email и пароль Boosty"
 

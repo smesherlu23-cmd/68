@@ -55,6 +55,10 @@ class SettingsView:
             ui.chip_button("Ключи и имя",
                            lambda e, a=adapter, ac=account: self._account_dialog(a, ac)),
         ]
+        if adapter.key == "boosty":
+            buttons.append(ui.chip_button(
+                "Войти через Google",
+                lambda e, ac=account: self._boosty_google_login(ac)))
         if adapter.key == "boosty" and adapter.auto_login_configured(account.id):
             buttons.append(ui.chip_button(
                 "Войти автоматически",
@@ -72,6 +76,19 @@ class SettingsView:
             ], spacing=16),
             bgcolor=th.BG_CARD, border=ft.border.all(1, th.BORDER_CARD),
             border_radius=12, padding=ft.padding.symmetric(18, 20))
+
+    def _boosty_google_login(self, account) -> None:
+        """Ассистированный вход через Google: откроется видимый браузер, где
+        пользователь входит сам; выполняется в фоне, чтобы не блокировать UI."""
+        self.app.snack("Откроется браузер — войдите в Boosty через Google…")
+
+        def work() -> None:
+            ok, message = get_adapter("boosty").assisted_login(account.id, "google")
+            self.app.snack(message)
+            if ok:
+                self.app.set_nav("settings")
+
+        self.app.page.run_thread(work)
 
     def _boosty_auto_login(self, account) -> None:
         """Запускает автовход Boosty (форма + email-2FA) в фоновом потоке."""
